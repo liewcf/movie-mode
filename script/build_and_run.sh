@@ -2,8 +2,9 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="FocusMonitor"
-BUNDLE_ID="com.liewcf.FocusMonitor"
+APP_NAME="MovieMode"
+BUNDLE_ID="com.liewcf.MovieMode"
+LEGACY_APP_NAME="FocusMonitor"
 MIN_SYSTEM_VERSION="13.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,11 +16,13 @@ APP_BINARY="$APP_MACOS/$APP_NAME"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+pkill -x "$LEGACY_APP_NAME" >/dev/null 2>&1 || true
 
 swift build
 BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"
 
 rm -rf "$APP_BUNDLE"
+rm -rf "$DIST_DIR/$LEGACY_APP_NAME.app"
 mkdir -p "$APP_MACOS"
 cp "$BUILD_BINARY" "$APP_BINARY"
 chmod +x "$APP_BINARY"

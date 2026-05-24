@@ -3,7 +3,7 @@ import FocusMonitorCore
 import SwiftUI
 
 @main
-struct FocusMonitorApp: App {
+struct MovieModeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let image = NSImage(
             systemSymbolName: controller.menuBarSymbolName,
-            accessibilityDescription: "Focus Monitor"
+            accessibilityDescription: "MovieMode"
         )
         image?.isTemplate = true
         button.image = image
@@ -103,7 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit Focus Monitor", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit MovieMode", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 

@@ -1,4 +1,4 @@
-# Focus Monitor Design
+# MovieMode Design
 
 ## Goal
 
@@ -23,7 +23,7 @@ The app will be a SwiftPM macOS app using a SwiftUI app lifecycle and an AppKit 
 
 Main parts:
 
-- `FocusMonitorApp`: app entry point.
+- `MovieModeApp`: app entry point.
 - `AppDelegate`: owns the status item, click handling, display-change observer, and app cleanup.
 - `DisplayShieldController`: owns toggle state and coordinates shield windows.
 - `DisplayShieldWindow`: borderless AppKit window shown on one non-main display.
@@ -52,7 +52,7 @@ Left-click toggles Movie Mode immediately. Right-click opens a small context men
 
 - A short status line such as `Shielding 2 displays` or `No extra displays`.
 - A fallback toggle item: `Start Movie Mode` or `Stop Movie Mode`.
-- `Quit Focus Monitor`.
+- `Quit MovieMode`.
 
 Visible menu labels stay short and scannable.
 

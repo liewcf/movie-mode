@@ -2,18 +2,18 @@
 import PackageDescription
 
 let package = Package(
-    name: "FocusMonitor",
+    name: "MovieMode",
     platforms: [
         .macOS(.v13)
     ],
     products: [
         .library(name: "FocusMonitorCore", targets: ["FocusMonitorCore"]),
-        .executable(name: "FocusMonitor", targets: ["FocusMonitor"])
+        .executable(name: "MovieMode", targets: ["MovieMode"])
     ],
     targets: [
         .target(name: "FocusMonitorCore"),
         .executableTarget(
-            name: "FocusMonitor",
+            name: "MovieMode",
             dependencies: ["FocusMonitorCore"]
         ),
         .testTarget(

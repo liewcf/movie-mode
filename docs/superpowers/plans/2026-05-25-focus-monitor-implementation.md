@@ -1,10 +1,10 @@
-# Focus Monitor Implementation Plan
+# MovieMode Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a menu-bar-only macOS app that toggles black full-screen shields on every non-main display.
 
-**Architecture:** Use SwiftPM with a testable `FocusMonitorCore` library and a thin `FocusMonitor` executable app. Core owns display snapshot models, toggle state, menu labels, and shield orchestration. The app target bridges to AppKit for `NSScreen` discovery, a one-click `NSStatusItem`, and borderless shield windows.
+**Architecture:** Use SwiftPM with a testable `FocusMonitorCore` library and a thin `MovieMode` executable app. Core owns display snapshot models, toggle state, menu labels, and shield orchestration. The app target bridges to AppKit for `NSScreen` discovery, a one-click `NSStatusItem`, and borderless shield windows.
 
 **Tech Stack:** Swift 5.9, SwiftPM, SwiftUI app lifecycle, AppKit `NSStatusItem`, AppKit `NSWindow`, XCTest.
 
@@ -12,13 +12,13 @@
 
 ## File Structure
 
-- Create `Package.swift`: SwiftPM package with `FocusMonitorCore`, `FocusMonitor`, and `FocusMonitorCoreTests`.
+- Create `Package.swift`: SwiftPM package with `FocusMonitorCore`, `MovieMode`, and `FocusMonitorCoreTests`.
 - Create `Sources/FocusMonitorCore/DisplaySnapshot.swift`: simple display identity/frame model.
 - Create `Sources/FocusMonitorCore/DisplayShieldController.swift`: testable movie-mode state machine.
 - Create `Tests/FocusMonitorCoreTests/DisplayShieldControllerTests.swift`: fake-provider tests for toggle and rebuild behavior.
-- Create `Sources/FocusMonitor/FocusMonitorApp.swift`: app entry point, status item click handling, accessory activation policy.
-- Create `Sources/FocusMonitor/AppKitDisplayProvider.swift`: `NSScreen` to `DisplaySnapshot` adapter.
-- Create `Sources/FocusMonitor/AppKitShieldManager.swift`: creates and closes black shield windows.
+- Create `Sources/MovieMode/MovieModeApp.swift`: app entry point, status item click handling, accessory activation policy.
+- Create `Sources/MovieMode/AppKitDisplayProvider.swift`: `NSScreen` to `DisplaySnapshot` adapter.
+- Create `Sources/MovieMode/AppKitShieldManager.swift`: creates and closes black shield windows.
 - Create `script/build_and_run.sh`: project-local build/run/verify loop for the SwiftPM GUI app.
 - Create `.codex/environments/environment.toml`: Codex Run action wired to `./script/build_and_run.sh`.
 
@@ -98,18 +98,18 @@ Expected: FAIL because `Package.swift` or `FocusMonitorCore` types do not exist 
 import PackageDescription
 
 let package = Package(
-    name: "FocusMonitor",
+    name: "MovieMode",
     platforms: [
         .macOS(.v13)
     ],
     products: [
         .library(name: "FocusMonitorCore", targets: ["FocusMonitorCore"]),
-        .executable(name: "FocusMonitor", targets: ["FocusMonitor"])
+        .executable(name: "MovieMode", targets: ["MovieMode"])
     ],
     targets: [
         .target(name: "FocusMonitorCore"),
         .executableTarget(
-            name: "FocusMonitor",
+            name: "MovieMode",
             dependencies: ["FocusMonitorCore"]
         ),
         .testTarget(
@@ -138,8 +138,8 @@ public struct DisplaySnapshot: Equatable, Identifiable {
 ```
 
 ```swift
-// Sources/FocusMonitor/main.swift
-print("Focus Monitor")
+// Sources/MovieMode/main.swift
+print("MovieMode")
 ```
 
 - [ ] **Step 4: Run test to verify remaining expected failure**
@@ -405,10 +405,10 @@ git commit -m "Add movie mode controller"
 ## Task 3: Add Menu Bar App and AppKit Display Bridge
 
 **Files:**
-- Delete: `Sources/FocusMonitor/main.swift`
-- Create: `Sources/FocusMonitor/FocusMonitorApp.swift`
-- Create: `Sources/FocusMonitor/AppKitDisplayProvider.swift`
-- Create: `Sources/FocusMonitor/AppKitShieldManager.swift`
+- Delete: `Sources/MovieMode/main.swift`
+- Create: `Sources/MovieMode/MovieModeApp.swift`
+- Create: `Sources/MovieMode/AppKitDisplayProvider.swift`
+- Create: `Sources/MovieMode/AppKitShieldManager.swift`
 
 - [ ] **Step 1: Run package tests before app code**
 
@@ -419,13 +419,13 @@ Expected: PASS.
 - [ ] **Step 2: Add the one-click status item app**
 
 ```swift
-// Sources/FocusMonitor/FocusMonitorApp.swift
+// Sources/MovieMode/MovieModeApp.swift
 import AppKit
 import FocusMonitorCore
 import SwiftUI
 
 @main
-struct FocusMonitorApp: App {
+struct MovieModeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -502,7 +502,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let image = NSImage(
             systemSymbolName: controller.menuBarSymbolName,
-            accessibilityDescription: "Focus Monitor"
+            accessibilityDescription: "MovieMode"
         )
         image?.isTemplate = true
         button.image = image
@@ -525,7 +525,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: "Quit Focus Monitor", action: #selector(quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit MovieMode", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
@@ -537,7 +537,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 - [ ] **Step 3: Add AppKit display provider**
 
 ```swift
-// Sources/FocusMonitor/AppKitDisplayProvider.swift
+// Sources/MovieMode/AppKitDisplayProvider.swift
 import AppKit
 import FocusMonitorCore
 
@@ -570,7 +570,7 @@ private extension NSScreen {
 - [ ] **Step 4: Add AppKit shield manager**
 
 ```swift
-// Sources/FocusMonitor/AppKitShieldManager.swift
+// Sources/MovieMode/AppKitShieldManager.swift
 import AppKit
 import FocusMonitorCore
 
@@ -635,14 +635,14 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Sources/FocusMonitor
+git add Sources/MovieMode
 git commit -m "Add menu bar app shell"
 ```
 
 ## Task 4: Confirm Display Configuration Refresh
 
 **Files:**
-- Read: `Sources/FocusMonitor/FocusMonitorApp.swift`
+- Read: `Sources/MovieMode/MovieModeApp.swift`
 
 - [ ] **Step 1: Build to confirm screen-change observer integration**
 
@@ -659,7 +659,7 @@ Expected: PASS.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add Sources/FocusMonitor/FocusMonitorApp.swift
+git add Sources/MovieMode/MovieModeApp.swift
 git commit -m "Refresh shields on display changes"
 ```
 
@@ -676,8 +676,8 @@ git commit -m "Refresh shields on display changes"
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="FocusMonitor"
-BUNDLE_ID="com.liewcf.FocusMonitor"
+APP_NAME="MovieMode"
+BUNDLE_ID="com.liewcf.MovieMode"
 MIN_SYSTEM_VERSION="13.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -763,7 +763,7 @@ Expected: no output.
 ```toml
 # THIS IS AUTOGENERATED. DO NOT EDIT MANUALLY
 version = 1
-name = "focus-monitor"
+name = "movie-mode"
 
 [setup]
 script = ""
@@ -778,7 +778,7 @@ command = "./script/build_and_run.sh"
 
 Run: `./script/build_and_run.sh --verify`
 
-Expected: PASS, app bundle exists at `dist/FocusMonitor.app`, and `pgrep -x FocusMonitor` finds the running process.
+Expected: PASS, app bundle exists at `dist/MovieMode.app`, and `pgrep -x MovieMode` finds the running process.
 
 - [ ] **Step 5: Commit**
 
@@ -809,7 +809,7 @@ Expected: PASS.
 
 Run: `./script/build_and_run.sh --verify`
 
-Expected: PASS and `dist/FocusMonitor.app` exists.
+Expected: PASS and `dist/MovieMode.app` exists.
 
 - [ ] **Step 4: Confirm git state**
 
