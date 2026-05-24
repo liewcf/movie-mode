@@ -4,9 +4,9 @@
 
 **Goal:** Build a menu-bar-only macOS app that toggles black full-screen shields on every non-main display.
 
-**Architecture:** Use SwiftPM with a testable `FocusMonitorCore` library and a thin `FocusMonitor` executable app. Core owns display snapshot models, toggle state, menu labels, and shield orchestration. The app target bridges to AppKit for `NSScreen` discovery, borderless shield windows, and a SwiftUI `MenuBarExtra`.
+**Architecture:** Use SwiftPM with a testable `FocusMonitorCore` library and a thin `FocusMonitor` executable app. Core owns display snapshot models, toggle state, menu labels, and shield orchestration. The app target bridges to AppKit for `NSScreen` discovery, a one-click `NSStatusItem`, and borderless shield windows.
 
-**Tech Stack:** Swift 5.9, SwiftPM, SwiftUI `MenuBarExtra`, AppKit `NSWindow`, XCTest.
+**Tech Stack:** Swift 5.9, SwiftPM, SwiftUI app lifecycle, AppKit `NSStatusItem`, AppKit `NSWindow`, XCTest.
 
 ---
 
@@ -16,7 +16,7 @@
 - Create `Sources/FocusMonitorCore/DisplaySnapshot.swift`: simple display identity/frame model.
 - Create `Sources/FocusMonitorCore/DisplayShieldController.swift`: testable movie-mode state machine.
 - Create `Tests/FocusMonitorCoreTests/DisplayShieldControllerTests.swift`: fake-provider tests for toggle and rebuild behavior.
-- Create `Sources/FocusMonitor/FocusMonitorApp.swift`: app entry point, menu bar scene, accessory activation policy.
+- Create `Sources/FocusMonitor/FocusMonitorApp.swift`: app entry point, status item click handling, accessory activation policy.
 - Create `Sources/FocusMonitor/AppKitDisplayProvider.swift`: `NSScreen` to `DisplaySnapshot` adapter.
 - Create `Sources/FocusMonitor/AppKitShieldManager.swift`: creates and closes black shield windows.
 - Create `script/build_and_run.sh`: project-local build/run/verify loop for the SwiftPM GUI app.
@@ -416,7 +416,7 @@ Run: `swift test --filter DisplayShieldControllerTests`
 
 Expected: PASS.
 
-- [ ] **Step 2: Add the SwiftUI menu bar app**
+- [ ] **Step 2: Add the one-click status item app**
 
 ```swift
 // Sources/FocusMonitor/FocusMonitorApp.swift
@@ -427,35 +427,109 @@ import SwiftUI
 @main
 struct FocusMonitorApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var controller = DisplayShieldController(
-        displayProvider: AppKitDisplayProvider(),
-        shieldManager: AppKitShieldManager()
-    )
 
     var body: some Scene {
-        MenuBarExtra {
-            Button(controller.toggleTitle) {
-                controller.toggleMovieMode()
-            }
-
-            Text(controller.statusText)
-                .foregroundStyle(.secondary)
-
-            Divider()
-
-            Button("Quit Focus Monitor") {
-                controller.deactivateMovieMode()
-                NSApplication.shared.terminate(nil)
-            }
-        } label: {
-            Image(systemName: controller.menuBarSymbolName)
+        Settings {
+            EmptyView()
         }
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let controller = DisplayShieldController(
+        displayProvider: AppKitDisplayProvider(),
+        shieldManager: AppKitShieldManager()
+    )
+    private var statusItem: NSStatusItem?
+    private var screenObserver: NSObjectProtocol?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        configureStatusItem()
+        observeScreenChanges()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        controller.deactivateMovieMode()
+
+        if let screenObserver {
+            NotificationCenter.default.removeObserver(screenObserver)
+        }
+    }
+
+    private func configureStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = item
+        item.button?.target = self
+        item.button?.action = #selector(handleStatusItemClick)
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        updateStatusItem()
+    }
+
+    private func observeScreenChanges() {
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.controller.refreshDisplayConfiguration()
+                self?.updateStatusItem()
+            }
+        }
+    }
+
+    @objc private func handleStatusItemClick() {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            showContextMenu()
+            return
+        }
+
+        controller.toggleMovieMode()
+        updateStatusItem()
+    }
+
+    @objc private func quit() {
+        controller.deactivateMovieMode()
+        NSApplication.shared.terminate(nil)
+    }
+
+    private func updateStatusItem() {
+        guard let button = statusItem?.button else {
+            return
+        }
+
+        let image = NSImage(
+            systemSymbolName: controller.menuBarSymbolName,
+            accessibilityDescription: "Focus Monitor"
+        )
+        image?.isTemplate = true
+        button.image = image
+        button.toolTip = controller.statusText
+    }
+
+    private func showContextMenu() {
+        guard let button = statusItem?.button else {
+            return
+        }
+
+        let menu = NSMenu()
+        let statusItem = NSMenuItem(title: controller.statusText, action: nil, keyEquivalent: "")
+        statusItem.isEnabled = false
+        menu.addItem(statusItem)
+
+        let toggleItem = NSMenuItem(title: controller.toggleTitle, action: #selector(handleStatusItemClick), keyEquivalent: "")
+        toggleItem.target = self
+        menu.addItem(toggleItem)
+
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(title: "Quit Focus Monitor", action: #selector(quit), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
     }
 }
 ```
@@ -534,11 +608,12 @@ private final class DisplayShieldWindow: NSWindow {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         hasShadow = false
         ignoresMouseEvents = false
-        releasedWhenClosed = false
+        isReleasedWhenClosed = false
 
-        contentView = NSView(frame: frame)
-        contentView?.wantsLayer = true
-        contentView?.layer?.backgroundColor = NSColor.black.cgColor
+        let contentView = NSView(frame: CGRect(origin: .zero, size: frame.size))
+        contentView.wantsLayer = true
+        contentView.layer?.backgroundColor = NSColor.black.cgColor
+        self.contentView = contentView
     }
 
     override var canBecomeKey: Bool {
@@ -564,134 +639,24 @@ git add Sources/FocusMonitor
 git commit -m "Add menu bar app shell"
 ```
 
-## Task 4: Rebuild Shields on Display Configuration Changes
+## Task 4: Confirm Display Configuration Refresh
 
 **Files:**
-- Modify: `Sources/FocusMonitor/FocusMonitorApp.swift`
+- Read: `Sources/FocusMonitor/FocusMonitorApp.swift`
 
-- [ ] **Step 1: Add screen-change handling code**
-
-Replace `Sources/FocusMonitor/FocusMonitorApp.swift` with:
-
-```swift
-import AppKit
-import FocusMonitorCore
-import SwiftUI
-
-@main
-struct FocusMonitorApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var controller = DisplayShieldController(
-        displayProvider: AppKitDisplayProvider(),
-        shieldManager: AppKitShieldManager()
-    )
-
-    var body: some Scene {
-        MenuBarExtra {
-            Button(controller.toggleTitle) {
-                controller.toggleMovieMode()
-            }
-
-            Text(controller.statusText)
-                .foregroundStyle(.secondary)
-
-            Divider()
-
-            Button("Quit Focus Monitor") {
-                controller.deactivateMovieMode()
-                NSApplication.shared.terminate(nil)
-            }
-        } label: {
-            Image(systemName: controller.menuBarSymbolName)
-        }
-    }
-}
-
-@MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var screenObserver: NSObjectProtocol?
-
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
-    }
-
-    func connect(controller: DisplayShieldController) {
-        guard screenObserver == nil else {
-            return
-        }
-
-        screenObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil,
-            queue: .main
-        ) { [weak controller] _ in
-            controller?.refreshDisplayConfiguration()
-        }
-    }
-
-    func applicationWillTerminate(_ notification: Notification) {
-        if let screenObserver {
-            NotificationCenter.default.removeObserver(screenObserver)
-        }
-    }
-}
-```
-
-Add this view below `FocusMonitorApp` and above `AppDelegate`, then replace the `MenuBarExtra` content block with `FocusMonitorMenu(controller: controller) { appDelegate.connect(controller: controller) }`.
-
-```swift
-private struct FocusMonitorMenu: View {
-    @ObservedObject var controller: DisplayShieldController
-    let onAppear: () -> Void
-
-    var body: some View {
-        Group {
-            Button(controller.toggleTitle) {
-                controller.toggleMovieMode()
-            }
-
-            Text(controller.statusText)
-                .foregroundStyle(.secondary)
-
-            Divider()
-
-            Button("Quit Focus Monitor") {
-                controller.deactivateMovieMode()
-                NSApplication.shared.terminate(nil)
-            }
-        }
-        .onAppear(perform: onAppear)
-    }
-}
-```
-
-The complete `body` should be:
-
-```swift
-var body: some Scene {
-    MenuBarExtra {
-        FocusMonitorMenu(controller: controller) {
-            appDelegate.connect(controller: controller)
-        }
-    } label: {
-        Image(systemName: controller.menuBarSymbolName)
-    }
-}
-```
-
-- [ ] **Step 2: Build to reveal integration issues**
+- [ ] **Step 1: Build to confirm screen-change observer integration**
 
 Run: `swift build`
 
 Expected: PASS.
 
-- [ ] **Step 3: Run controller tests**
+- [ ] **Step 2: Run controller tests**
 
 Run: `swift test --filter DisplayShieldControllerTests`
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add Sources/FocusMonitor/FocusMonitorApp.swift
