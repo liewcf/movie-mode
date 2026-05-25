@@ -14,10 +14,6 @@ struct MovieModeSettingsView: View {
         }
         .padding(24)
         .frame(width: 520, alignment: .topLeading)
-        .fixedSize(horizontal: false, vertical: true)
-        .onAppear {
-            store.refreshDisplays()
-        }
     }
 
     private var autoSection: some View {
@@ -48,9 +44,8 @@ struct MovieModeSettingsView: View {
 
                 if store.settings.displayRule == .watch {
                     Picker("Watch display", selection: watchDisplayBinding) {
-                        Text("Select a display").tag(Optional<String>.none)
                         ForEach(store.availableDisplays) { display in
-                            Text(display.name).tag(Optional(display.id))
+                            Text(display.name).tag(display.id)
                         }
                     }
                 }
@@ -113,9 +108,9 @@ struct MovieModeSettingsView: View {
         )
     }
 
-    private var watchDisplayBinding: Binding<String?> {
+    private var watchDisplayBinding: Binding<String> {
         Binding(
-            get: { store.settings.watchDisplayID },
+            get: { store.settings.watchDisplayID ?? store.availableDisplays.first?.id ?? "" },
             set: { newValue in store.update { $0.watchDisplayID = newValue } }
         )
     }
@@ -152,9 +147,21 @@ final class ObservableMovieModeSettingsStore: ObservableObject {
             return DisplayOption(id: id, name: "\(name)\(mainSuffix)")
         }
 
-        if settings.watchDisplayID == nil {
-            update { $0.watchDisplayID = NSScreen.main?.movieModeScreenID }
+        applyDefaultWatchDisplayIDIfNeeded()
+    }
+
+    /// Updates watch display default without running `onSettingsChanged` (avoids re-entrancy while opening Settings).
+    private func applyDefaultWatchDisplayIDIfNeeded() {
+        guard settings.watchDisplayID == nil,
+              let mainID = NSScreen.main?.movieModeScreenID
+        else {
+            return
         }
+
+        var next = settings
+        next.watchDisplayID = mainID
+        settings = next
+        defaultsStore.settings = next
     }
 
     func update(_ transform: (inout MovieModeSettings) -> Void) {

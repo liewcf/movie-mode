@@ -136,7 +136,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
-        settingsWindowController.show()
+        // Defer until after the status item menu closes; opening a window from the menu action can crash.
+        DispatchQueue.main.async { [weak self] in
+            self?.settingsWindowController.show()
+        }
     }
 
     private func updateStatusItem() {

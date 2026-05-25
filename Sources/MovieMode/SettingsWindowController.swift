@@ -6,17 +6,16 @@ final class SettingsWindowController {
     private var window: NSWindow?
     private let settingsStore: ObservableMovieModeSettingsStore
 
-    private static let contentWidth: CGFloat = 520
-    private static let contentHeight: CGFloat = 620
+    private static let windowSize = NSSize(width: 560, height: 640)
 
     init(settingsStore: ObservableMovieModeSettingsStore) {
         self.settingsStore = settingsStore
     }
 
     func show() {
+        settingsStore.refreshDisplays()
+
         if let window {
-            settingsStore.refreshDisplays()
-            resizeWindowIfNeeded(window)
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             return
@@ -25,34 +24,22 @@ final class SettingsWindowController {
         let hostingController = NSHostingController(
             rootView: MovieModeSettingsView(store: settingsStore)
         )
-        if #available(macOS 13.0, *) {
-            hostingController.sizingOptions = [.preferredContentSize]
-        }
 
-        let window = NSWindow(contentViewController: hostingController)
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: Self.windowSize),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
         window.title = "MovieMode Settings"
-        window.styleMask = [.titled, .closable]
+        window.contentViewController = hostingController
+        window.contentMinSize = Self.windowSize
+        window.setContentSize(Self.windowSize)
+        window.center()
         window.isReleasedWhenClosed = false
         self.window = window
 
-        settingsStore.refreshDisplays()
-        resizeWindowIfNeeded(window)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-    }
-
-    private func resizeWindowIfNeeded(_ window: NSWindow) {
-        guard let hostingView = window.contentView else {
-            window.setContentSize(NSSize(width: Self.contentWidth, height: Self.contentHeight))
-            window.center()
-            return
-        }
-
-        hostingView.layoutSubtreeIfNeeded()
-        let fitting = hostingView.fittingSize
-        let width = max(Self.contentWidth, fitting.width)
-        let height = max(Self.contentHeight, fitting.height)
-        window.setContentSize(NSSize(width: width, height: height))
-        window.center()
     }
 }
