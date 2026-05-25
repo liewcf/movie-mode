@@ -3,3 +3,4 @@ dist/
 .swiftpm/
 .DS_Store
 /docs/
+.codex/
