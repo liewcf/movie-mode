@@ -8,6 +8,14 @@
   A one-click movie mode for multi-display Macs.
 </p>
 
+<p align="center">
+  <a href="https://github.com/liewcf/movie-mode">liewcf/movie-mode</a>
+</p>
+
+<p align="center">
+  <img src="Assets/MovieMode-Screenshot.png" alt="MovieMode menu bar screenshot" width="311">
+</p>
+
 MovieMode is a small macOS menu bar app that helps you watch on your main display while visually blacking out your other active displays.
 
 > MovieMode creates black shield windows on non-main displays. It does not sleep, power off, disable, mirror, or rearrange monitors.
