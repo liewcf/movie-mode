@@ -93,3 +93,7 @@ MovieMode is a SwiftPM macOS app.
 - Public app identity, executable target, bundle, and process name: `MovieMode`
 - Internal testable core module: `FocusMonitorCore`
 - Built app bundle: `dist/MovieMode.app`
+
+## License
+
+MovieMode is available under the MIT License. See [LICENSE](LICENSE).
