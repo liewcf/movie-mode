@@ -5,27 +5,28 @@
 </p>
 
 <p align="center">
-  A one-click movie mode for multi-display Macs.
+  A one-click movie mode for multi-display Macs — with optional <strong>auto movie mode</strong> when you fullscreen VLC, IINA, or the browser.
 </p>
 
 <p align="center">
-  <a href="https://github.com/liewcf/movie-mode">liewcf/movie-mode</a>
+  <a href="https://github.com/liewcf/movie-mode">Upstream: liewcf/movie-mode</a>
 </p>
 
 <p align="center">
   <img src="Assets/MovieMode-Screenshot.png" alt="MovieMode menu bar screenshot" width="311">
 </p>
 
-MovieMode is a small macOS menu bar app that helps you watch on your main display while visually blacking out your other active displays.
+MovieMode is a small macOS menu bar app that helps you watch on one display while visually blacking out the others. Turn it on manually from the menu bar, or enable **auto movie mode** to shield extra displays when fullscreen playback starts.
 
 > MovieMode creates black shield windows on non-main displays. It does not sleep, power off, disable, mirror, or rearrange monitors.
 
 ## What It Does
 
 - Toggles movie mode from the macOS menu bar.
-- Keeps the main display visible.
-- Covers every active non-main display with a borderless black window.
-- Restores the extra displays when movie mode is turned off.
+- Optionally turns on automatically when VLC, IINA, or a browser enters fullscreen.
+- Keeps your chosen display(s) visible using a configurable display rule.
+- Covers other active displays with borderless black shield windows.
+- Restores the extra displays when movie mode ends.
 
 ## Install
 
@@ -53,9 +54,31 @@ The script builds `dist/MovieMode.app`, installs the app icon, launches MovieMod
 ## Use MovieMode
 
 - Left-click the menu bar icon to turn movie mode on or off.
-- Right-click the menu bar icon to see the current status, toggle movie mode, or quit the app.
+- Right-click the menu bar icon for status, manual toggle, **Auto Movie Mode**, **Settings**, or quit.
 
-When movie mode is on, the menu bar icon changes and all active non-main displays are covered by black shield windows.
+When movie mode is on, the menu bar icon changes and shield windows cover the displays chosen by your display rule.
+
+### Auto Movie Mode
+
+1. Right-click the menu bar icon and enable **Auto Movie Mode**, or open **Settings** and turn on **Enable auto movie mode**.
+2. Choose a **Display rule**:
+   - **Playing display** (default): the fullscreen display stays visible; others are shielded.
+   - **Main display**: the macOS main display stays visible; auto runs when fullscreen is on the main display.
+   - **Watch display**: a display you pick stays visible; auto runs when fullscreen is on that display.
+3. **Also keep Main Display visible** (default on): keeps your main display unshielded even when video plays on another screen.
+4. For YouTube and other browsers, enable **Use Accessibility for browser detection** and grant Accessibility permission to MovieMode when macOS prompts you.
+
+Auto mode is off by default. Manual left-click still works when auto is off.
+
+**Left-click while auto is active:** first click keeps movie mode on but switches to manual control (fullscreen exit will not auto-dismiss). Click again to turn movie mode off.
+
+Open **Settings** from the menu bar right-click menu (not from the system Settings app). MovieMode is a menu bar accessory and uses its own settings window.
+
+After changing the app, rebuild before launching from `dist/`:
+
+```sh
+./script/build_and_run.sh
+```
 
 ## Privacy And Safety
 
@@ -84,7 +107,15 @@ No. MovieMode visually blacks out extra displays with black windows. Your monito
 
 ### Which display stays visible?
 
-The main macOS display stays visible. MovieMode covers the other active displays.
+By default, **Playing display** keeps the fullscreen monitor visible and shields the rest. With **Also keep Main Display visible** enabled, the macOS main display stays visible too. Change the rule in Settings.
+
+### Does auto mode work with VLC, IINA, and YouTube?
+
+Yes. VLC and IINA work with the built-in window detection. Browsers are more reliable when **Use Accessibility for browser detection** is enabled in Settings.
+
+### Does MovieMode read my screen or send data anywhere?
+
+No network usage. Optional Accessibility access is only used to detect fullscreen browser windows when you enable that setting. Window detection otherwise uses local window information from macOS.
 
 ### Why does macOS warn me when opening the app?
 

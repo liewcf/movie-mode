@@ -18,3 +18,4 @@ Do not store secrets, credentials, API keys, private tokens, database dumps, or 
 - Use `swift test` for tests, `swift build` for compilation, and `./script/build_and_run.sh --verify` to build and launch `dist/MovieMode.app`.
 - The app uses an AppKit `NSStatusItem` for true one-click left-click toggling. Right-click opens status, toggle, and quit menu items.
 - Version 1 visually blacks out non-main displays with borderless black shield windows. Do not add private display APIs or actual monitor sleep/power-off behavior unless explicitly requested.
+- Optional auto movie mode detects eligible fullscreen playback (heuristics plus optional Accessibility) and shields displays per user display rules in Settings.
