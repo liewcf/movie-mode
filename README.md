@@ -5,18 +5,18 @@
 </p>
 
 <p align="center">
-  A one-click movie mode for multi-display Macs.
+  A one-click movie mode for multi-display Macs — with optional <strong>auto movie mode</strong> when you fullscreen VLC, IINA, or the browser.
 </p>
 
 <p align="center">
-  <a href="https://github.com/liewcf/movie-mode">liewcf/movie-mode</a>
+  <a href="https://github.com/liewcf/movie-mode">Upstream: liewcf/movie-mode</a>
 </p>
 
 <p align="center">
   <img src="Assets/MovieMode-Screenshot.png" alt="MovieMode menu bar screenshot" width="311">
 </p>
 
-MovieMode is a small macOS menu bar app that helps you watch on your main display while visually blacking out your other active displays.
+MovieMode is a small macOS menu bar app that helps you watch on one display while visually blacking out the others. Turn it on manually from the menu bar, or enable **auto movie mode** to shield extra displays when fullscreen playback starts.
 
 > MovieMode creates black shield windows on non-main displays. It does not sleep, power off, disable, mirror, or rearrange monitors.
 
