@@ -7,6 +7,7 @@ struct MovieModeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
+        // Menu bar (LSUIElement) apps cannot use the system Settings window; AppDelegate opens a custom window.
         Settings {
             EmptyView()
         }
@@ -15,24 +16,80 @@ struct MovieModeApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let controller = DisplayShieldController(
-        displayProvider: AppKitDisplayProvider(),
-        shieldManager: AppKitShieldManager()
+    private let persistedSettings: UserDefaultsMovieModeSettingsStore
+    let settingsStore: ObservableMovieModeSettingsStore
+    private lazy var settingsWindowController = SettingsWindowController(settingsStore: settingsStore)
+
+    private let displayProvider = AppKitDisplayProvider()
+    private let shieldManager = AppKitShieldManager()
+    private lazy var shieldController = DisplayShieldController(
+        displayProvider: displayProvider,
+        shieldManager: shieldManager
     )
+    private lazy var coordinator = MovieModeCoordinator(
+        displayProvider: displayProvider,
+        shieldController: shieldController,
+        settings: settingsStore.settings
+    )
+    private lazy var fullscreenDetector = CompositeFullscreenDetector(settingsStore: persistedSettings)
+
     private var statusItem: NSStatusItem?
     private var screenObserver: NSObjectProtocol?
+
+    override init() {
+        let persisted = UserDefaultsMovieModeSettingsStore()
+        self.persistedSettings = persisted
+        self.settingsStore = ObservableMovieModeSettingsStore(defaultsStore: persisted)
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         configureStatusItem()
         observeScreenChanges()
+        configureSettings()
+        configureDetector()
+        updateStatusItem()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        controller.deactivateMovieMode()
+        fullscreenDetector.stop()
+        shieldController.deactivateMovieMode()
 
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
+        }
+    }
+
+    private func configureSettings() {
+        settingsStore.onSettingsChanged = { [weak self] settings in
+            guard let self else {
+                return
+            }
+
+            self.coordinator.updateSettings(settings)
+            self.fullscreenDetector.restartIfNeeded()
+
+            if settings.autoMovieModeEnabled {
+                self.fullscreenDetector.start()
+            } else {
+                self.fullscreenDetector.stop()
+            }
+
+            self.updateStatusItem()
+        }
+    }
+
+    private func configureDetector() {
+        fullscreenDetector.onEvent = { [weak self] event in
+            Task { @MainActor in
+                self?.coordinator.handleFullscreenEvent(event)
+                self?.updateStatusItem()
+            }
+        }
+
+        if settingsStore.settings.autoMovieModeEnabled {
+            fullscreenDetector.start()
         }
     }
 
@@ -42,7 +99,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.target = self
         item.button?.action = #selector(handleStatusItemClick)
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        updateStatusItem()
     }
 
     private func observeScreenChanges() {
@@ -50,9 +106,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
             queue: .main
-        ) { _ in
+        ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.controller.refreshDisplayConfiguration()
+                self?.settingsStore.refreshDisplays()
+                self?.coordinator.handleDisplayConfigurationChanged()
                 self?.updateStatusItem()
             }
         }
@@ -64,13 +121,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        controller.toggleMovieMode()
+        coordinator.toggleManualMovieModePreservingAutoIfActive()
         updateStatusItem()
     }
 
     @objc private func quit() {
-        controller.deactivateMovieMode()
+        fullscreenDetector.stop()
+        shieldController.deactivateMovieMode()
         NSApplication.shared.terminate(nil)
+    }
+
+    @objc private func toggleAutoMovieMode() {
+        settingsStore.update { $0.autoMovieModeEnabled.toggle() }
+    }
+
+    @objc private func openSettings() {
+        settingsWindowController.show()
     }
 
     private func updateStatusItem() {
@@ -79,12 +145,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let image = NSImage(
-            systemSymbolName: controller.menuBarSymbolName,
+            systemSymbolName: shieldController.menuBarSymbolName,
             accessibilityDescription: "MovieMode"
         )
         image?.isTemplate = true
         button.image = image
-        button.toolTip = controller.statusText
+        button.toolTip = statusTooltip
+    }
+
+    private var statusTooltip: String {
+        var parts = [shieldController.statusText]
+        if settingsStore.settings.autoMovieModeEnabled {
+            parts.append("Auto on")
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func showContextMenu() {
@@ -93,13 +167,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = NSMenu()
-        let statusItem = NSMenuItem(title: controller.statusText, action: nil, keyEquivalent: "")
-        statusItem.isEnabled = false
-        menu.addItem(statusItem)
+        let statusMenuItem = NSMenuItem(title: shieldController.statusText, action: nil, keyEquivalent: "")
+        statusMenuItem.isEnabled = false
+        menu.addItem(statusMenuItem)
 
-        let toggleItem = NSMenuItem(title: controller.toggleTitle, action: #selector(handleStatusItemClick), keyEquivalent: "")
+        let toggleItem = NSMenuItem(title: shieldController.toggleTitle, action: #selector(handleStatusItemClick), keyEquivalent: "")
         toggleItem.target = self
         menu.addItem(toggleItem)
+
+        let autoItem = NSMenuItem(
+            title: "Auto Movie Mode",
+            action: #selector(toggleAutoMovieMode),
+            keyEquivalent: ""
+        )
+        autoItem.target = self
+        autoItem.state = settingsStore.settings.autoMovieModeEnabled ? .on : .off
+        menu.addItem(autoItem)
+
+        menu.addItem(.separator())
+
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        menu.addItem(settingsItem)
 
         menu.addItem(.separator())
 

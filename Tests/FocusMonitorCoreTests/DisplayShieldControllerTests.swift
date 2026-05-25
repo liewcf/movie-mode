@@ -4,7 +4,7 @@ import XCTest
 
 final class DisplayShieldControllerTests: XCTestCase {
     @MainActor
-    func testActivatingMovieModeShieldsOnlyNonMainDisplays() {
+    func testActivatingMovieModeShieldsOnlySpecifiedDisplays() {
         let provider = FakeDisplayProvider(displays: [
             DisplaySnapshot(id: "main", frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), isMain: true),
             DisplaySnapshot(id: "side", frame: CGRect(x: 1920, y: 0, width: 1920, height: 1080), isMain: false)
@@ -12,11 +12,12 @@ final class DisplayShieldControllerTests: XCTestCase {
         let shieldManager = FakeShieldManager()
         let controller = DisplayShieldController(displayProvider: provider, shieldManager: shieldManager)
 
-        controller.toggleMovieMode()
+        controller.activateMovieMode(shieldDisplayIDs: ["side"], activationSource: .manual)
 
         XCTAssertTrue(controller.isMovieModeActive)
         XCTAssertEqual(shieldManager.shownDisplayIDs, ["side"])
         XCTAssertEqual(controller.shieldedDisplayCount, 1)
+        XCTAssertEqual(controller.activationSource, .manual)
         XCTAssertEqual(controller.statusText, "Shielding 1 display")
         XCTAssertEqual(controller.toggleTitle, "Stop Movie Mode")
         XCTAssertEqual(controller.menuBarSymbolName, "moon.fill")
@@ -32,15 +33,16 @@ final class DisplayShieldControllerTests: XCTestCase {
         let shieldManager = FakeShieldManager()
         let controller = DisplayShieldController(displayProvider: provider, shieldManager: shieldManager)
 
-        controller.toggleMovieMode()
-        controller.toggleMovieMode()
+        controller.activateMovieMode(shieldDisplayIDs: ["left", "right"], activationSource: .manual)
+        controller.deactivateMovieMode()
 
         XCTAssertFalse(controller.isMovieModeActive)
-        XCTAssertEqual(shieldManager.closedTokens, [
-            DisplayShieldToken(displayID: "left"),
-            DisplayShieldToken(displayID: "right")
-        ])
+        XCTAssertEqual(
+            shieldManager.closedTokens.map(\.displayID).sorted(),
+            ["left", "right"]
+        )
         XCTAssertEqual(controller.shieldedDisplayCount, 0)
+        XCTAssertNil(controller.activationSource)
         XCTAssertEqual(controller.statusText, "Movie Mode Off")
         XCTAssertEqual(controller.toggleTitle, "Start Movie Mode")
         XCTAssertEqual(controller.menuBarSymbolName, "moon")
@@ -54,7 +56,7 @@ final class DisplayShieldControllerTests: XCTestCase {
         let shieldManager = FakeShieldManager()
         let controller = DisplayShieldController(displayProvider: provider, shieldManager: shieldManager)
 
-        controller.toggleMovieMode()
+        controller.activateMovieMode(shieldDisplayIDs: [], activationSource: .manual)
 
         XCTAssertTrue(controller.isMovieModeActive)
         XCTAssertEqual(shieldManager.shownDisplayIDs, [])
@@ -71,41 +73,15 @@ final class DisplayShieldControllerTests: XCTestCase {
         let shieldManager = FakeShieldManager()
         let controller = DisplayShieldController(displayProvider: provider, shieldManager: shieldManager)
 
-        controller.toggleMovieMode()
+        controller.activateMovieMode(shieldDisplayIDs: ["left"], activationSource: .manual)
         provider.displays = [
             DisplaySnapshot(id: "main", frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), isMain: true),
             DisplaySnapshot(id: "right", frame: CGRect(x: 1920, y: 0, width: 1920, height: 1080), isMain: false)
         ]
-        controller.refreshDisplayConfiguration()
+        controller.refreshDisplayConfiguration(shieldDisplayIDs: ["right"])
 
         XCTAssertEqual(shieldManager.closedTokens, [DisplayShieldToken(displayID: "left")])
         XCTAssertEqual(shieldManager.shownDisplayIDs, ["left", "right"])
         XCTAssertEqual(controller.shieldedDisplayCount, 1)
-    }
-}
-
-private final class FakeDisplayProvider: DisplayProviding {
-    var displays: [DisplaySnapshot]
-
-    init(displays: [DisplaySnapshot]) {
-        self.displays = displays
-    }
-
-    func currentDisplays() -> [DisplaySnapshot] {
-        displays
-    }
-}
-
-private final class FakeShieldManager: ShieldManaging {
-    private(set) var shownDisplayIDs: [String] = []
-    private(set) var closedTokens: [DisplayShieldToken] = []
-
-    func showShield(on display: DisplaySnapshot) -> DisplayShieldToken? {
-        shownDisplayIDs.append(display.id)
-        return DisplayShieldToken(displayID: display.id)
-    }
-
-    func closeShield(_ token: DisplayShieldToken) {
-        closedTokens.append(token)
     }
 }

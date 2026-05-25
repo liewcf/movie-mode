@@ -23,6 +23,7 @@ public struct DisplayShieldToken: Equatable {
 public final class DisplayShieldController: ObservableObject {
     @Published public private(set) var isMovieModeActive = false
     @Published public private(set) var shieldedDisplayCount = 0
+    @Published public private(set) var activationSource: MovieModeActivationSource?
 
     private let displayProvider: DisplayProviding
     private let shieldManager: ShieldManaging
@@ -57,37 +58,56 @@ public final class DisplayShieldController: ObservableObject {
         return "Shielding \(shieldedDisplayCount) displays"
     }
 
-    public func toggleMovieMode() {
+    public func toggleMovieMode(shieldDisplayIDs: Set<String>, activationSource: MovieModeActivationSource) {
         if isMovieModeActive {
             deactivateMovieMode()
         } else {
-            activateMovieMode()
+            activateMovieMode(shieldDisplayIDs: shieldDisplayIDs, activationSource: activationSource)
         }
     }
 
-    public func refreshDisplayConfiguration() {
-        guard isMovieModeActive else {
-            return
-        }
-
-        closeActiveShields()
-        createShieldsForCurrentDisplays()
+    public func activateMovieMode(shieldDisplayIDs: Set<String>, activationSource: MovieModeActivationSource) {
+        isMovieModeActive = true
+        self.activationSource = activationSource
+        applyShields(shieldDisplayIDs: shieldDisplayIDs)
     }
 
     public func deactivateMovieMode() {
         closeActiveShields()
         isMovieModeActive = false
+        activationSource = nil
     }
 
-    private func activateMovieMode() {
-        isMovieModeActive = true
-        createShieldsForCurrentDisplays()
+    public func promoteToManualActivation() {
+        guard isMovieModeActive else {
+            return
+        }
+
+        activationSource = .manual
     }
 
-    private func createShieldsForCurrentDisplays() {
-        activeTokens = displayProvider.currentDisplays()
-            .filter { !$0.isMain }
-            .compactMap { shieldManager.showShield(on: $0) }
+    public func refreshDisplayConfiguration(shieldDisplayIDs: Set<String>) {
+        guard isMovieModeActive else {
+            return
+        }
+
+        applyShields(shieldDisplayIDs: shieldDisplayIDs)
+    }
+
+    private func applyShields(shieldDisplayIDs: Set<String>) {
+        closeActiveShields()
+
+        let displaysByID = Dictionary(
+            uniqueKeysWithValues: displayProvider.currentDisplays().map { ($0.id, $0) }
+        )
+
+        activeTokens = shieldDisplayIDs.compactMap { displayID in
+            guard let display = displaysByID[displayID] else {
+                return nil
+            }
+
+            return shieldManager.showShield(on: display)
+        }
         shieldedDisplayCount = activeTokens.count
     }
 

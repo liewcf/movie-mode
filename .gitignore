@@ -4,3 +4,8 @@ dist/
 .DS_Store
 /docs/
 .codex/
+
+# Local agent / editor config (do not commit)
+.agents/
+skills-lock.json
+.cursor/
