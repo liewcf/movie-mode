@@ -20,7 +20,7 @@ final class AXFullscreenDetector: FullscreenPlaybackDetecting {
         scan()
 
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.scan()
             }
         }
@@ -30,7 +30,7 @@ final class AXFullscreenDetector: FullscreenPlaybackDetecting {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.scan()
             }
         }

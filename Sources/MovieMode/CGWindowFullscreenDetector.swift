@@ -20,7 +20,7 @@ final class CGWindowFullscreenDetector: FullscreenPlaybackDetecting {
         scan()
 
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.scan()
             }
         }
@@ -30,7 +30,7 @@ final class CGWindowFullscreenDetector: FullscreenPlaybackDetecting {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.scan()
             }
         }
