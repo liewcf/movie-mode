@@ -1,6 +1,6 @@
 # Auto Movie Mode — Design Spec
 
-**Status:** Approved (2025-05-25)  
+**Status:** Approved (2026-05-25)
 **Author:** Brainstorming session (user + agent)
 
 ## Summary

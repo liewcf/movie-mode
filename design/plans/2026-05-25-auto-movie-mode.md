@@ -397,7 +397,7 @@ Run: `swift test`
 
 ## Execution handoff
 
-Plan complete and saved to `design/plans/2025-05-25-auto-movie-mode.md`.
+Plan complete and saved to `design/plans/2026-05-25-auto-movie-mode.md`.
 
 **Default:** `subagent-driven-development` — dispatch each plan task via Cursor `Task` (implementer, then spec reviewer, then code quality reviewer). Parent agent does not implement task code inline.
 
