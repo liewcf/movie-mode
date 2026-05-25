@@ -1,9 +1,11 @@
 import Combine
 
+@MainActor
 public protocol DisplayProviding {
     func currentDisplays() -> [DisplaySnapshot]
 }
 
+@MainActor
 public protocol ShieldManaging {
     func showShield(on display: DisplaySnapshot) -> DisplayShieldToken?
     func closeShield(_ token: DisplayShieldToken)
