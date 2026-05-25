@@ -25,6 +25,8 @@
 - Launch verification command: `./script/build_and_run.sh --verify`.
 - Built app bundle: `dist/MovieMode.app`.
 - Process name: `MovieMode`.
+- App icon source: `Assets/MovieMode-AppIcon.png`; generated bundle icon: `Assets/MovieMode.icns`.
+- `script/build_and_run.sh` copies `Assets/MovieMode.icns` into `Contents/Resources` and declares `CFBundleIconFile`.
 
 ## Constraints
 
