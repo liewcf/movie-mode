@@ -95,19 +95,33 @@ public final class DisplayShieldController: ObservableObject {
     }
 
     private func applyShields(shieldDisplayIDs: Set<String>) {
-        closeActiveShields()
-
         let displaysByID = Dictionary(
             uniqueKeysWithValues: displayProvider.currentDisplays().map { ($0.id, $0) }
         )
+        let currentIDs = Set(activeTokens.map(\.displayID))
 
-        activeTokens = shieldDisplayIDs.compactMap { displayID in
+        if currentIDs == shieldDisplayIDs {
+            shieldedDisplayCount = activeTokens.count
+            return
+        }
+
+        let toRemove = currentIDs.subtracting(shieldDisplayIDs)
+        for token in activeTokens where toRemove.contains(token.displayID) {
+            shieldManager.closeShield(token)
+        }
+        activeTokens.removeAll { toRemove.contains($0.displayID) }
+
+        let existingIDs = Set(activeTokens.map(\.displayID))
+        for displayID in shieldDisplayIDs where !existingIDs.contains(displayID) {
             guard let display = displaysByID[displayID] else {
-                return nil
+                continue
             }
 
-            return shieldManager.showShield(on: display)
+            if let token = shieldManager.showShield(on: display) {
+                activeTokens.append(token)
+            }
         }
+
         shieldedDisplayCount = activeTokens.count
     }
 

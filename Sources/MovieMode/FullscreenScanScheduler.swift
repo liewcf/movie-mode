@@ -16,7 +16,9 @@ final class FullscreenScanScheduler {
         scan()
 
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            self?.scan()
+            Task { @MainActor [weak self] in
+                self?.scan()
+            }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer

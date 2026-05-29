@@ -10,8 +10,11 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
     private var workspaceObserver: NSObjectProtocol?
     private var activeSession: (displayID: String, bundleIdentifier: String)?
     private var consecutiveMissCount = 0
-    /// Require several missed scans before exiting — avoids flicker when Chrome fullscreen is briefly undetectable.
-    private let exitMissThreshold = 3
+    private var sessionStartedAt: Date?
+    /// Suppress false exits while Chrome finishes entering fullscreen and shields settle.
+    private let activationGraceDuration: TimeInterval = 5
+    private let exitMissThresholdWhenNotFullscreen = 2
+    private let exitMissThresholdWhileFrontmost = 5
     private let settingsStore: MovieModeSettingsStore
 
     init(settingsStore: MovieModeSettingsStore) {
@@ -62,6 +65,7 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
     func resetTracking() {
         activeSession = nil
         consecutiveMissCount = 0
+        sessionStartedAt = nil
     }
 
     func scanNow() {
@@ -74,32 +78,65 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
     }
 
     private func scan() {
-        if let match = findFullscreenMatch() {
+        let settings = settingsStore.settings
+        let allowlist = MovieModeBundleAllowlist.resolvedIdentifiers(from: settings)
+        let windowList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]]
+
+        if let match = findFullscreenMatch(windowList: windowList) {
             consecutiveMissCount = 0
             applyMatch(match)
             return
         }
 
-        guard activeSession != nil else {
+        guard let session = activeSession else {
+            return
+        }
+
+        let stillFullscreen = FullscreenMatchSelector.hasFullscreenPlayback(
+            forBundleIdentifier: session.bundleIdentifier,
+            cgWindowList: windowList,
+            screens: NSScreen.screens,
+            allowlist: allowlist,
+            includeAccessibility: settings.useAccessibilityDetection
+        )
+
+        if stillFullscreen {
+            consecutiveMissCount = 0
+            return
+        }
+
+        if isWithinActivationGracePeriod {
             return
         }
 
         consecutiveMissCount += 1
-        guard consecutiveMissCount >= exitMissThreshold else {
+        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        let threshold = frontmost == session.bundleIdentifier
+            ? exitMissThresholdWhileFrontmost
+            : exitMissThresholdWhenNotFullscreen
+        guard consecutiveMissCount >= threshold else {
             return
         }
 
         consecutiveMissCount = 0
+        sessionStartedAt = nil
         emitExitedIfNeeded()
     }
 
-    private func findFullscreenMatch() -> (displayID: String, bundleIdentifier: String)? {
-        let allowlist = MovieModeBundleAllowlist.resolvedIdentifiers(from: settingsStore.settings)
+    private var isWithinActivationGracePeriod: Bool {
+        guard let sessionStartedAt else {
+            return false
+        }
+
+        return Date().timeIntervalSince(sessionStartedAt) < activationGraceDuration
+    }
+
+    private func findFullscreenMatch(windowList: [[String: Any]]?) -> (displayID: String, bundleIdentifier: String)? {
         let settings = settingsStore.settings
-        let windowList = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements],
-            kCGNullWindowID
-        ) as? [[String: Any]]
+        let allowlist = MovieModeBundleAllowlist.resolvedIdentifiers(from: settings)
 
         let match = FullscreenMatchSelector.selectBest(
             cgWindowList: windowList,
@@ -117,11 +154,32 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
     }
 
     private func applyMatch(_ match: (displayID: String, bundleIdentifier: String)) {
-        if let activeSession, activeSession.displayID == match.displayID, activeSession.bundleIdentifier == match.bundleIdentifier {
-            return
+        let isNewSession = activeSession == nil || activeSession?.bundleIdentifier != match.bundleIdentifier
+
+        if let activeSession {
+            if activeSession.displayID == match.displayID, activeSession.bundleIdentifier == match.bundleIdentifier {
+                return
+            }
+
+            if activeSession.bundleIdentifier == match.bundleIdentifier {
+                self.activeSession = match
+                onEvent?(
+                    FullscreenPlaybackEvent(
+                        kind: .entered,
+                        displayID: match.displayID,
+                        bundleIdentifier: match.bundleIdentifier
+                    )
+                )
+                return
+            }
+
+            emitExitedIfNeeded()
         }
 
-        emitExitedIfNeeded()
+        if isNewSession {
+            sessionStartedAt = Date()
+        }
+
         activeSession = match
         onEvent?(
             FullscreenPlaybackEvent(
@@ -138,6 +196,7 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
         }
 
         self.activeSession = nil
+        sessionStartedAt = nil
         onEvent?(
             FullscreenPlaybackEvent(
                 kind: .exited,

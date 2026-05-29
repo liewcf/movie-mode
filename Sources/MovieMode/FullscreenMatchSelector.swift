@@ -38,6 +38,8 @@ enum FullscreenMatchSelector {
     static let browserMinCoverage: CGFloat = 0.98
     static let nativePlayerMinCoverage: CGFloat = 0.90
 
+    static let browserFullscreenTolerance: CGFloat = 24
+
     static func selectBest(
         cgWindowList: [[String: Any]]?,
         screens: [NSScreen],
@@ -75,6 +77,43 @@ enum FullscreenMatchSelector {
         return Match(displayID: best.displayID, bundleIdentifier: best.bundleIdentifier, score: best.score)
     }
 
+    static func hasFullscreenPlayback(
+        forBundleIdentifier bundleID: String,
+        cgWindowList: [[String: Any]]?,
+        screens: [NSScreen],
+        allowlist: Set<String>,
+        includeAccessibility: Bool
+    ) -> Bool {
+        guard allowlist.contains(bundleID) else {
+            return false
+        }
+
+        var candidates: [Candidate] = []
+
+        if let cgWindowList {
+            candidates.append(
+                contentsOf: candidatesFromWindowList(
+                    cgWindowList,
+                    screens: screens,
+                    allowlist: allowlist,
+                    frontmostBundleIdentifier: nil
+                )
+            )
+        }
+
+        if includeAccessibility, AXIsProcessTrusted() {
+            candidates.append(
+                contentsOf: candidatesFromAccessibility(
+                    screens: screens,
+                    allowlist: allowlist,
+                    frontmostBundleIdentifier: nil
+                )
+            )
+        }
+
+        return candidates.contains { $0.bundleIdentifier == bundleID }
+    }
+
     private static func candidatesFromWindowList(
         _ windowList: [[String: Any]],
         screens: [NSScreen],
@@ -95,26 +134,29 @@ enum FullscreenMatchSelector {
             }
 
             let layer = windowInfo[kCGWindowLayer as String] as? Int ?? 0
-            let windowBounds = ScreenIdentity.appKitFrame(
-                fromTopLeftGlobalFrame: CGRect(
-                    x: boundsDict["X"] ?? 0,
-                    y: boundsDict["Y"] ?? 0,
-                    width: boundsDict["Width"] ?? 0,
-                    height: boundsDict["Height"] ?? 0
-                )
+            let quartzBounds = CGRect(
+                x: boundsDict["X"] ?? 0,
+                y: boundsDict["Y"] ?? 0,
+                width: boundsDict["Width"] ?? 0,
+                height: boundsDict["Height"] ?? 0
             )
 
-            guard let screen = matchingScreen(
-                for: windowBounds,
+            guard let (screen, coverage, displayBounds) = matchingScreenInQuartz(
+                for: quartzBounds,
                 among: screens,
                 bundleID: bundleID,
-                frontmostBundleIdentifier: frontmostBundleIdentifier
+                layer: layer
             ) else {
                 continue
             }
 
-            let coverage = coverageRatio(windowBounds: windowBounds, screenFrame: screen.frame)
-            guard layerIsEligible(layer, bundleID: bundleID, coverage: coverage) else {
+            guard layerIsEligible(
+                layer,
+                bundleID: bundleID,
+                coverage: coverage,
+                quartzWindowBounds: quartzBounds,
+                displayBounds: displayBounds
+            ) else {
                 continue
             }
 
@@ -159,16 +201,14 @@ enum FullscreenMatchSelector {
                     continue
                 }
 
-                let appKitFrame = ScreenIdentity.appKitFrame(fromAccessibilityFrame: axFrame)
-                guard let screen = matchingScreenForAccessibility(
-                    windowBounds: appKitFrame,
+                guard let (screen, coverage) = matchingScreenForAccessibility(
+                    windowBounds: axFrame,
                     among: screens,
                     bundleID: bundleID
                 ) else {
                     continue
                 }
 
-                let coverage = coverageRatio(windowBounds: appKitFrame, screenFrame: screen.frame)
                 let score = score(
                     bundleID: bundleID,
                     frontmostBundleIdentifier: frontmostBundleIdentifier,
@@ -230,7 +270,9 @@ enum FullscreenMatchSelector {
     private static func layerIsEligible(
         _ layer: Int,
         bundleID: String,
-        coverage: CGFloat
+        coverage: CGFloat,
+        quartzWindowBounds: CGRect,
+        displayBounds: CGRect
     ) -> Bool {
         guard layer >= 0 && layer <= 25 else {
             return false
@@ -241,14 +283,98 @@ enum FullscreenMatchSelector {
         }
 
         if browserBundleIdentifiers.contains(bundleID) {
-            // Maximized browser windows sit at layer 0 (~95% coverage); true fullscreen uses elevated layers.
-            if layer > 0 {
-                return coverage >= 0.95
+            if ScreenIdentity.isQuartzWindowApproximatelyFullscreen(
+                windowBounds: quartzWindowBounds,
+                displayBounds: displayBounds,
+                tolerance: browserFullscreenTolerance
+            ) {
+                return true
             }
-            return coverage >= browserMinCoverage
+
+            if layer == 0 && coverage >= 0.992 {
+                return true
+            }
+
+            // Chrome true fullscreen sometimes uses elevated layers with a slight inset.
+            if layer > 0 && coverage >= 0.95 {
+                return true
+            }
+
+            return false
         }
 
         return layer == 0 && coverage >= browserMinCoverage
+    }
+
+    private static func matchingScreenInQuartz(
+        for windowBounds: CGRect,
+        among screens: [NSScreen],
+        bundleID: String,
+        layer: Int
+    ) -> (NSScreen, CGFloat, CGRect)? {
+        var bestMatch: NSScreen?
+        var bestCoverage: CGFloat = 0
+        var bestDisplayBounds: CGRect = .zero
+
+        for screen in screens {
+            guard let displayBounds = ScreenIdentity.quartzDisplayBounds(for: screen) else {
+                continue
+            }
+
+            let coverage = coverageRatio(windowBounds: windowBounds, screenFrame: displayBounds)
+            guard qualifiesForScreen(
+                bundleID: bundleID,
+                layer: layer,
+                coverage: coverage,
+                windowBounds: windowBounds,
+                displayBounds: displayBounds
+            ) else {
+                continue
+            }
+
+            if coverage > bestCoverage {
+                bestCoverage = coverage
+                bestMatch = screen
+                bestDisplayBounds = displayBounds
+            }
+        }
+
+        guard let bestMatch else {
+            return nil
+        }
+
+        return (bestMatch, bestCoverage, bestDisplayBounds)
+    }
+
+    private static func qualifiesForScreen(
+        bundleID: String,
+        layer: Int,
+        coverage: CGFloat,
+        windowBounds: CGRect,
+        displayBounds: CGRect
+    ) -> Bool {
+        if nativePlayerBundleIdentifiers.contains(bundleID) {
+            return coverage >= nativePlayerMinCoverage
+        }
+
+        if browserBundleIdentifiers.contains(bundleID) {
+            if ScreenIdentity.isQuartzWindowApproximatelyFullscreen(
+                windowBounds: windowBounds,
+                displayBounds: displayBounds,
+                tolerance: browserFullscreenTolerance
+            ) {
+                return true
+            }
+
+            // True fullscreen hides the menu bar (~100% coverage); maximized windows stop around 93–97%.
+            if layer == 0 && coverage >= 0.992 {
+                return true
+            }
+
+            return layer > 0 && coverage >= 0.95
+        }
+
+        return coverage >= browserMinCoverage
     }
 
     private static func matchingScreen(
@@ -288,22 +414,37 @@ enum FullscreenMatchSelector {
         windowBounds: CGRect,
         among screens: [NSScreen],
         bundleID: String
-    ) -> NSScreen? {
-        if let screen = ScreenIdentity.screen(containing: windowBounds, among: screens),
-           ScreenIdentity.isWindowApproximatelyFullscreen(
-               windowBounds: windowBounds,
-               on: screen,
-               tolerance: browserBundleIdentifiers.contains(bundleID) ? 24 : 8
-           ) {
-            return screen
+    ) -> (NSScreen, CGFloat)? {
+        var bestMatch: NSScreen?
+        var bestCoverage: CGFloat = 0
+
+        for screen in screens {
+            guard let displayBounds = ScreenIdentity.quartzDisplayBounds(for: screen) else {
+                continue
+            }
+
+            let coverage = coverageRatio(windowBounds: windowBounds, screenFrame: displayBounds)
+            let aligned = ScreenIdentity.isQuartzWindowApproximatelyFullscreen(
+                windowBounds: windowBounds,
+                displayBounds: displayBounds,
+                tolerance: browserBundleIdentifiers.contains(bundleID) ? browserFullscreenTolerance : 8
+            )
+
+            guard aligned || coverage >= nativePlayerMinCoverage else {
+                continue
+            }
+
+            if coverage > bestCoverage {
+                bestCoverage = coverage
+                bestMatch = screen
+            }
         }
 
-        return matchingScreen(
-            for: windowBounds,
-            among: screens,
-            bundleID: bundleID,
-            frontmostBundleIdentifier: nil
-        )
+        guard let bestMatch else {
+            return nil
+        }
+
+        return (bestMatch, bestCoverage)
     }
 
     private static func coverageRatio(windowBounds: CGRect, screenFrame: CGRect) -> CGFloat {

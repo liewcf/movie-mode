@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 
 enum ScreenIdentity {
     static func screenID(for screen: NSScreen) -> String {
@@ -29,6 +30,31 @@ enum ScreenIdentity {
         }
 
         return bestMatch
+    }
+
+    static func quartzDisplayBounds(for screen: NSScreen) -> CGRect? {
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        guard let number = screen.deviceDescription[key] as? NSNumber else {
+            return nil
+        }
+
+        let displayID = CGDirectDisplayID(number.uint32Value)
+        guard displayID != 0 else {
+            return nil
+        }
+
+        return CGDisplayBounds(displayID)
+    }
+
+    static func isQuartzWindowApproximatelyFullscreen(
+        windowBounds: CGRect,
+        displayBounds: CGRect,
+        tolerance: CGFloat = 4
+    ) -> Bool {
+        abs(windowBounds.origin.x - displayBounds.origin.x) <= tolerance
+            && abs(windowBounds.origin.y - displayBounds.origin.y) <= tolerance
+            && abs(windowBounds.width - displayBounds.width) <= tolerance
+            && abs(windowBounds.height - displayBounds.height) <= tolerance
     }
 
     static func appKitFrame(fromTopLeftGlobalFrame frame: CGRect) -> CGRect {

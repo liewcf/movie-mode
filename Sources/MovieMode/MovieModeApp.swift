@@ -117,13 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in
                 self?.settingsStore.refreshDisplays()
                 self?.coordinator.handleDisplayConfigurationChanged()
-                if self?.shieldController.isMovieModeActive == true,
-                   self?.shieldController.activationSource == .auto {
-                    // Keep session while auto-shielding; shield windows can disturb one scan cycle.
-                    self?.fullscreenDetector.scanNow()
-                } else {
-                    self?.fullscreenDetector.resync()
-                }
+                // Shield windows fire this notification — rescanning here caused false exits.
                 self?.updateStatusItem()
             }
         }
