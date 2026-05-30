@@ -36,7 +36,8 @@ enum FullscreenMatchSelector {
     ]
 
     static let browserMinCoverage: CGFloat = 0.98
-    static let nativePlayerMinCoverage: CGFloat = 0.90
+    static let nativePlayerStrictMinCoverage: CGFloat = 0.98
+    static let nativePlayerFullscreenTolerance: CGFloat = 8
 
     static let browserPresentationMinCoverage: CGFloat = 0.85
     static let browserFullscreenTolerance: CGFloat = 24
@@ -327,44 +328,49 @@ enum FullscreenMatchSelector {
     ) -> [Candidate] {
         var candidates: [Candidate] = []
 
-        for app in NSWorkspace.shared.runningApplications where !app.isTerminated {
-            guard let bundleID = app.bundleIdentifier, allowlist.contains(bundleID) else {
+        guard
+            let frontmostBundleIdentifier,
+            allowlist.contains(frontmostBundleIdentifier),
+            let app = NSWorkspace.shared.runningApplications.first(where: {
+                !$0.isTerminated && $0.bundleIdentifier == frontmostBundleIdentifier
+            }),
+            let bundleID = app.bundleIdentifier
+        else {
+            return []
+        }
+
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        var windowsValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue) == .success,
+              let windows = windowsValue as? [AXUIElement]
+        else {
+            return []
+        }
+
+        for window in windows where windowIsFullscreen(window) {
+            guard let axFrame = windowFrame(window) else {
                 continue
             }
 
-            let appElement = AXUIElementCreateApplication(app.processIdentifier)
-            var windowsValue: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsValue) == .success,
-                  let windows = windowsValue as? [AXUIElement]
-            else {
+            guard let (screen, coverage) = matchingScreenForAccessibility(
+                windowBounds: axFrame,
+                among: screens,
+                bundleID: bundleID
+            ) else {
                 continue
             }
 
-            for window in windows where windowIsFullscreen(window) {
-                guard let axFrame = windowFrame(window) else {
-                    continue
-                }
+            let score = score(
+                bundleID: bundleID,
+                frontmostBundleIdentifier: frontmostBundleIdentifier,
+                coverage: coverage,
+                layer: 0,
+                accessibilityConfirmed: true
+            )
 
-                guard let (screen, coverage) = matchingScreenForAccessibility(
-                    windowBounds: axFrame,
-                    among: screens,
-                    bundleID: bundleID
-                ) else {
-                    continue
-                }
-
-                let score = score(
-                    bundleID: bundleID,
-                    frontmostBundleIdentifier: frontmostBundleIdentifier,
-                    coverage: coverage,
-                    layer: 0,
-                    accessibilityConfirmed: true
-                )
-
-                candidates.append(
-                    Candidate(displayID: screen.movieModeScreenID, bundleIdentifier: bundleID, score: score)
-                )
-            }
+            candidates.append(
+                Candidate(displayID: screen.movieModeScreenID, bundleIdentifier: bundleID, score: score)
+            )
         }
 
         return candidates
@@ -423,7 +429,11 @@ enum FullscreenMatchSelector {
         }
 
         if nativePlayerBundleIdentifiers.contains(bundleID) {
-            return coverage >= nativePlayerMinCoverage
+            return nativePlayerQualifies(
+                windowBounds: quartzWindowBounds,
+                displayBounds: displayBounds,
+                coverage: coverage
+            )
         }
 
         if browserBundleIdentifiers.contains(bundleID) {
@@ -499,7 +509,11 @@ enum FullscreenMatchSelector {
         displayBounds: CGRect
     ) -> Bool {
         if nativePlayerBundleIdentifiers.contains(bundleID) {
-            return coverage >= nativePlayerMinCoverage
+            return nativePlayerQualifies(
+                windowBounds: windowBounds,
+                displayBounds: displayBounds,
+                coverage: coverage
+            )
         }
 
         if browserBundleIdentifiers.contains(bundleID) {
@@ -529,7 +543,7 @@ enum FullscreenMatchSelector {
     ) -> NSScreen? {
         let minCoverage: CGFloat
         if nativePlayerBundleIdentifiers.contains(bundleID) {
-            minCoverage = nativePlayerMinCoverage
+            minCoverage = nativePlayerStrictMinCoverage
         } else if browserBundleIdentifiers.contains(bundleID) {
             minCoverage = browserMinCoverage
         } else {
@@ -574,7 +588,10 @@ enum FullscreenMatchSelector {
                 tolerance: browserBundleIdentifiers.contains(bundleID) ? browserFullscreenTolerance : 8
             )
 
-            guard aligned || coverage >= nativePlayerMinCoverage else {
+            guard nativePlayerBundleIdentifiers.contains(bundleID)
+                ? nativePlayerQualifies(windowBounds: windowBounds, displayBounds: displayBounds, coverage: coverage)
+                : aligned || coverage >= browserMinCoverage
+            else {
                 continue
             }
 
@@ -589,6 +606,18 @@ enum FullscreenMatchSelector {
         }
 
         return (bestMatch, bestCoverage)
+    }
+
+    private static func nativePlayerQualifies(
+        windowBounds: CGRect,
+        displayBounds: CGRect,
+        coverage: CGFloat
+    ) -> Bool {
+        ScreenIdentity.isQuartzWindowApproximatelyFullscreen(
+            windowBounds: windowBounds,
+            displayBounds: displayBounds,
+            tolerance: nativePlayerFullscreenTolerance
+        ) || coverage >= nativePlayerStrictMinCoverage
     }
 
     private static func coverageRatio(windowBounds: CGRect, screenFrame: CGRect) -> CGFloat {
