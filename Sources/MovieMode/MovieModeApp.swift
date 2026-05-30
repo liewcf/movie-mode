@@ -89,7 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func configureDetector() {
         fullscreenDetector.onEvent = { [weak self] event in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.coordinator.handleFullscreenEvent(event)
                 self?.updateStatusItem()
             }
