@@ -9,12 +9,19 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
     private var scheduler: FullscreenScanScheduler?
     private var workspaceObserver: NSObjectProtocol?
     private var activeSession: (displayID: String, bundleIdentifier: String)?
-    private var consecutiveMissCount = 0
+    private var consecutiveNoPlaybackCount = 0
     private var sessionStartedAt: Date?
+    private var lastExitedAt: Date?
+    private var browserWatchLatched = false
+    private var peakBrowserCoverage: CGFloat = 0
     /// Suppress false exits while Chrome finishes entering fullscreen and shields settle.
-    private let activationGraceDuration: TimeInterval = 5
-    private let exitMissThresholdWhenNotFullscreen = 2
-    private let exitMissThresholdWhileFrontmost = 5
+    private let activationGraceDuration: TimeInterval = 3
+    /// Ignore new auto-enter briefly after exit (YouTube exit animation looks like fullscreen).
+    private let enterCooldownAfterExit: TimeInterval = 4
+    private let browserExitScansWhenBackgrounded = 3
+    private let browserExitScansPlaybackEnded = 8
+    private let nativeExitScansWhileFrontmost = 6
+    private let nativeExitScansWhenBackgrounded = 2
     private let settingsStore: MovieModeSettingsStore
 
     init(settingsStore: MovieModeSettingsStore) {
@@ -64,8 +71,10 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
 
     func resetTracking() {
         activeSession = nil
-        consecutiveMissCount = 0
+        consecutiveNoPlaybackCount = 0
         sessionStartedAt = nil
+        browserWatchLatched = false
+        peakBrowserCoverage = 0
     }
 
     func scanNow() {
@@ -80,14 +89,19 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
     private func scan() {
         let settings = settingsStore.settings
         let allowlist = MovieModeBundleAllowlist.resolvedIdentifiers(from: settings)
+        let screens = NSScreen.screens
         let windowList = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly, .excludeDesktopElements],
             kCGNullWindowID
         ) as? [[String: Any]]
 
         if let match = findFullscreenMatch(windowList: windowList) {
-            consecutiveMissCount = 0
-            applyMatch(match)
+            if activeSession == nil, isWithinEnterCooldown {
+                return
+            }
+
+            consecutiveNoPlaybackCount = 0
+            applyMatch(match, windowList: windowList, screens: screens)
             return
         }
 
@@ -95,16 +109,24 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
             return
         }
 
-        let stillFullscreen = FullscreenMatchSelector.hasFullscreenPlayback(
-            forBundleIdentifier: session.bundleIdentifier,
-            cgWindowList: windowList,
-            screens: NSScreen.screens,
+        if evaluateBrowserSession(
+            session: session,
+            windowList: windowList,
+            screens: screens,
             allowlist: allowlist,
-            includeAccessibility: settings.useAccessibilityDetection
-        )
+            settings: settings
+        ) {
+            consecutiveNoPlaybackCount = 0
+            return
+        }
 
-        if stillFullscreen {
-            consecutiveMissCount = 0
+        if playbackStillActive(
+            session: session,
+            windowList: windowList,
+            allowlist: allowlist,
+            settings: settings
+        ) {
+            consecutiveNoPlaybackCount = 0
             return
         }
 
@@ -112,18 +134,122 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
             return
         }
 
-        consecutiveMissCount += 1
+        consecutiveNoPlaybackCount += 1
+
         let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
-        let threshold = frontmost == session.bundleIdentifier
-            ? exitMissThresholdWhileFrontmost
-            : exitMissThresholdWhenNotFullscreen
-        guard consecutiveMissCount >= threshold else {
+        let exitThreshold: Int
+        if FullscreenMatchSelector.browserBundleIdentifiers.contains(session.bundleIdentifier) {
+            exitThreshold = frontmost == session.bundleIdentifier
+                ? browserExitScansPlaybackEnded
+                : browserExitScansWhenBackgrounded
+        } else {
+            exitThreshold = frontmost == session.bundleIdentifier
+                ? nativeExitScansWhileFrontmost
+                : nativeExitScansWhenBackgrounded
+        }
+
+        guard consecutiveNoPlaybackCount >= exitThreshold else {
             return
         }
 
-        consecutiveMissCount = 0
-        sessionStartedAt = nil
+        consecutiveNoPlaybackCount = 0
+        clearBrowserLatchState()
         emitExitedIfNeeded()
+    }
+
+    /// Browser sessions latch while Chrome is frontmost; exit when coverage drops after true fullscreen.
+    private func evaluateBrowserSession(
+        session: (displayID: String, bundleIdentifier: String),
+        windowList: [[String: Any]]?,
+        screens: [NSScreen],
+        allowlist: Set<String>,
+        settings: MovieModeSettings
+    ) -> Bool {
+        guard FullscreenMatchSelector.browserBundleIdentifiers.contains(session.bundleIdentifier) else {
+            return false
+        }
+
+        guard browserWatchLatched else {
+            return false
+        }
+
+        let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        guard frontmost == session.bundleIdentifier else {
+            return false
+        }
+
+        let currentCoverage = FullscreenMatchSelector.largestWindowCoverage(
+            forBundleIdentifier: session.bundleIdentifier,
+            cgWindowList: windowList,
+            screens: screens
+        )
+        peakBrowserCoverage = max(peakBrowserCoverage, currentCoverage)
+
+        let overlayVisible = FullscreenMatchSelector.hasPresentationOverlay(
+            forBundleIdentifier: session.bundleIdentifier,
+            cgWindowList: windowList,
+            screens: screens
+        )
+        let strictVisible = FullscreenMatchSelector.hasFullscreenPlayback(
+            forBundleIdentifier: session.bundleIdentifier,
+            cgWindowList: windowList,
+            screens: screens,
+            allowlist: allowlist,
+            includeAccessibility: settings.useAccessibilityDetection
+        )
+
+        if overlayVisible || strictVisible || FullscreenMatchSelector.browserPlaybackIsActive(
+            forBundleIdentifier: session.bundleIdentifier,
+            cgWindowList: windowList,
+            screens: screens,
+            allowlist: allowlist,
+            includeAccessibility: settings.useAccessibilityDetection
+        ) {
+            return true
+        }
+
+        return !FullscreenMatchSelector.browserPlaybackLikelyEnded(
+            currentCoverage: currentCoverage,
+            peakCoverage: peakBrowserCoverage,
+            overlayVisible: overlayVisible,
+            strictFullscreenVisible: strictVisible
+        )
+    }
+
+    private var isWithinEnterCooldown: Bool {
+        guard let lastExitedAt else {
+            return false
+        }
+
+        return Date().timeIntervalSince(lastExitedAt) < enterCooldownAfterExit
+    }
+
+    private func playbackStillActive(
+        session: (displayID: String, bundleIdentifier: String),
+        windowList: [[String: Any]]?,
+        allowlist: Set<String>,
+        settings: MovieModeSettings
+    ) -> Bool {
+        let screens = NSScreen.screens
+        let includeAccessibility = settings.useAccessibilityDetection
+
+        if FullscreenMatchSelector.browserBundleIdentifiers.contains(session.bundleIdentifier) {
+            return FullscreenMatchSelector.browserPlaybackIsActive(
+                forBundleIdentifier: session.bundleIdentifier,
+                cgWindowList: windowList,
+                screens: screens,
+                allowlist: allowlist,
+                includeAccessibility: includeAccessibility
+            )
+        }
+
+        return FullscreenMatchSelector.hasFullscreenPlayback(
+            forBundleIdentifier: session.bundleIdentifier,
+            cgWindowList: windowList,
+            screens: screens,
+            allowlist: allowlist,
+            includeAccessibility: includeAccessibility
+        )
     }
 
     private var isWithinActivationGracePeriod: Bool {
@@ -153,7 +279,11 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
         return (match.displayID, match.bundleIdentifier)
     }
 
-    private func applyMatch(_ match: (displayID: String, bundleIdentifier: String)) {
+    private func applyMatch(
+        _ match: (displayID: String, bundleIdentifier: String),
+        windowList: [[String: Any]]?,
+        screens: [NSScreen]
+    ) {
         let isNewSession = activeSession == nil || activeSession?.bundleIdentifier != match.bundleIdentifier
 
         if let activeSession {
@@ -178,6 +308,17 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
 
         if isNewSession {
             sessionStartedAt = Date()
+            if FullscreenMatchSelector.browserBundleIdentifiers.contains(match.bundleIdentifier) {
+                browserWatchLatched = true
+                peakBrowserCoverage = FullscreenMatchSelector.largestWindowCoverage(
+                    forBundleIdentifier: match.bundleIdentifier,
+                    cgWindowList: windowList,
+                    screens: screens
+                )
+            } else {
+                browserWatchLatched = false
+                peakBrowserCoverage = 0
+            }
         }
 
         activeSession = match
@@ -190,13 +331,20 @@ final class CompositeFullscreenDetector: FullscreenPlaybackDetecting {
         )
     }
 
+    private func clearBrowserLatchState() {
+        sessionStartedAt = nil
+        browserWatchLatched = false
+        peakBrowserCoverage = 0
+    }
+
     private func emitExitedIfNeeded() {
         guard let activeSession else {
             return
         }
 
         self.activeSession = nil
-        sessionStartedAt = nil
+        clearBrowserLatchState()
+        lastExitedAt = Date()
         onEvent?(
             FullscreenPlaybackEvent(
                 kind: .exited,

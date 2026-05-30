@@ -38,6 +38,7 @@ enum FullscreenMatchSelector {
     static let browserMinCoverage: CGFloat = 0.98
     static let nativePlayerMinCoverage: CGFloat = 0.90
 
+    static let browserPresentationMinCoverage: CGFloat = 0.85
     static let browserFullscreenTolerance: CGFloat = 24
 
     static func selectBest(
@@ -112,6 +113,149 @@ enum FullscreenMatchSelector {
         }
 
         return candidates.contains { $0.bundleIdentifier == bundleID }
+    }
+
+    /// Browser-only: true while YouTube f-key / HTML5 overlay or native window fullscreen is active.
+    static func browserPlaybackIsActive(
+        forBundleIdentifier bundleID: String,
+        cgWindowList: [[String: Any]]?,
+        screens: [NSScreen],
+        allowlist: Set<String>,
+        includeAccessibility: Bool
+    ) -> Bool {
+        guard browserBundleIdentifiers.contains(bundleID), allowlist.contains(bundleID) else {
+            return false
+        }
+
+        if hasPresentationOverlay(
+            forBundleIdentifier: bundleID,
+            cgWindowList: cgWindowList,
+            screens: screens
+        ) {
+            return true
+        }
+
+        return hasFullscreenPlayback(
+            forBundleIdentifier: bundleID,
+            cgWindowList: cgWindowList,
+            screens: screens,
+            allowlist: allowlist,
+            includeAccessibility: includeAccessibility
+        )
+    }
+
+    static func hasPresentationOverlay(
+        forBundleIdentifier bundleID: String,
+        cgWindowList: [[String: Any]]?,
+        screens: [NSScreen]
+    ) -> Bool {
+        guard let cgWindowList else {
+            return false
+        }
+
+        for windowInfo in cgWindowList {
+            guard
+                let boundsDict = windowInfo[kCGWindowBounds as String] as? [String: CGFloat],
+                let ownerPID = windowInfo[kCGWindowOwnerPID as String] as? Int,
+                let app = NSRunningApplication(processIdentifier: pid_t(ownerPID)),
+                app.bundleIdentifier == bundleID
+            else {
+                continue
+            }
+
+            let layer = windowInfo[kCGWindowLayer as String] as? Int ?? 0
+            guard layer >= 1 else {
+                continue
+            }
+
+            let quartzBounds = CGRect(
+                x: boundsDict["X"] ?? 0,
+                y: boundsDict["Y"] ?? 0,
+                width: boundsDict["Width"] ?? 0,
+                height: boundsDict["Height"] ?? 0
+            )
+
+            for screen in screens {
+                guard let displayBounds = ScreenIdentity.quartzDisplayBounds(for: screen) else {
+                    continue
+                }
+
+                let coverage = coverageRatio(windowBounds: quartzBounds, screenFrame: displayBounds)
+                if coverage >= browserPresentationMinCoverage {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    /// Largest display coverage among all on-screen windows owned by the app (quartz space).
+    static func largestWindowCoverage(
+        forBundleIdentifier bundleID: String,
+        cgWindowList: [[String: Any]]?,
+        screens: [NSScreen]
+    ) -> CGFloat {
+        guard let cgWindowList else {
+            return 0
+        }
+
+        var best: CGFloat = 0
+
+        for windowInfo in cgWindowList {
+            guard
+                let boundsDict = windowInfo[kCGWindowBounds as String] as? [String: CGFloat],
+                let ownerPID = windowInfo[kCGWindowOwnerPID as String] as? Int,
+                let app = NSRunningApplication(processIdentifier: pid_t(ownerPID)),
+                app.bundleIdentifier == bundleID
+            else {
+                continue
+            }
+
+            let quartzBounds = CGRect(
+                x: boundsDict["X"] ?? 0,
+                y: boundsDict["Y"] ?? 0,
+                width: boundsDict["Width"] ?? 0,
+                height: boundsDict["Height"] ?? 0
+            )
+
+            for screen in screens {
+                guard let displayBounds = ScreenIdentity.quartzDisplayBounds(for: screen) else {
+                    continue
+                }
+
+                let coverage = coverageRatio(windowBounds: quartzBounds, screenFrame: displayBounds)
+                best = max(best, coverage)
+            }
+        }
+
+        return best
+    }
+
+    /// True when a browser session likely ended (exited YouTube f-key / double-click fullscreen).
+    static func browserPlaybackLikelyEnded(
+        currentCoverage: CGFloat,
+        peakCoverage: CGFloat,
+        overlayVisible: Bool,
+        strictFullscreenVisible: Bool
+    ) -> Bool {
+        if overlayVisible || strictFullscreenVisible {
+            return false
+        }
+
+        if peakCoverage >= 0.98 && currentCoverage < 0.955 {
+            return true
+        }
+
+        if currentCoverage < 0.90 {
+            return true
+        }
+
+        if peakCoverage >= 0.85 && currentCoverage < peakCoverage - 0.04 {
+            return true
+        }
+
+        return false
     }
 
     private static func candidatesFromWindowList(
@@ -291,11 +435,12 @@ enum FullscreenMatchSelector {
                 return true
             }
 
-            if layer == 0 && coverage >= 0.992 {
+            // HTML5 / YouTube f-key overlays sit above the page at elevated layers.
+            if layer >= 1 && coverage >= browserPresentationMinCoverage {
                 return true
             }
 
-            // Chrome true fullscreen sometimes uses elevated layers with a slight inset.
+            // Chrome native fullscreen sometimes uses elevated layers with a slight inset.
             if layer > 0 && coverage >= 0.95 {
                 return true
             }
@@ -366,8 +511,7 @@ enum FullscreenMatchSelector {
                 return true
             }
 
-            // True fullscreen hides the menu bar (~100% coverage); maximized windows stop around 93–97%.
-            if layer == 0 && coverage >= 0.992 {
+            if layer >= 1 && coverage >= browserPresentationMinCoverage {
                 return true
             }
 
