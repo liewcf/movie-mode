@@ -84,4 +84,25 @@ final class DisplayShieldControllerTests: XCTestCase {
         XCTAssertEqual(shieldManager.shownDisplayIDs, ["left", "right"])
         XCTAssertEqual(controller.shieldedDisplayCount, 1)
     }
+
+    @MainActor
+    func testRefreshingSameDisplayIDsWithChangedGeometryRecreatesShields() {
+        let provider = FakeDisplayProvider(displays: [
+            DisplaySnapshot(id: "main", frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), isMain: true),
+            DisplaySnapshot(id: "side", frame: CGRect(x: 1920, y: 0, width: 1920, height: 1080), isMain: false)
+        ])
+        let shieldManager = FakeShieldManager()
+        let controller = DisplayShieldController(displayProvider: provider, shieldManager: shieldManager)
+
+        controller.activateMovieMode(shieldDisplayIDs: ["side"], activationSource: .manual)
+        provider.displays = [
+            DisplaySnapshot(id: "main", frame: CGRect(x: 0, y: 0, width: 1920, height: 1080), isMain: true),
+            DisplaySnapshot(id: "side", frame: CGRect(x: 1920, y: 0, width: 2560, height: 1440), isMain: false)
+        ]
+        controller.refreshDisplayConfiguration(shieldDisplayIDs: ["side"])
+
+        XCTAssertEqual(shieldManager.closedTokens, [DisplayShieldToken(displayID: "side")])
+        XCTAssertEqual(shieldManager.shownDisplayIDs, ["side", "side"])
+        XCTAssertEqual(controller.shieldedDisplayCount, 1)
+    }
 }

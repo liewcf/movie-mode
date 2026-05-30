@@ -44,7 +44,12 @@ public final class MovieModeCoordinator: ObservableObject {
             }
 
             let shieldIDs = policy.shieldDisplayIDs(displays: displays, playingDisplayID: event.displayID)
-            shieldController.activateMovieMode(shieldDisplayIDs: shieldIDs, activationSource: .auto)
+
+            if shieldController.isMovieModeActive, shieldController.activationSource == .auto {
+                shieldController.refreshDisplayConfiguration(shieldDisplayIDs: shieldIDs)
+            } else {
+                shieldController.activateMovieMode(shieldDisplayIDs: shieldIDs, activationSource: .auto)
+            }
 
         case .exited:
             currentPlayingDisplayID = nil

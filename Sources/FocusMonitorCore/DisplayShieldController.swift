@@ -1,4 +1,5 @@
 import Combine
+import CoreGraphics
 
 @MainActor
 public protocol DisplayProviding {
@@ -28,6 +29,7 @@ public final class DisplayShieldController: ObservableObject {
     private let displayProvider: DisplayProviding
     private let shieldManager: ShieldManaging
     private var activeTokens: [DisplayShieldToken] = []
+    private var appliedDisplayFrames: [String: CGRect] = [:]
 
     public init(displayProvider: DisplayProviding, shieldManager: ShieldManaging) {
         self.displayProvider = displayProvider
@@ -95,25 +97,75 @@ public final class DisplayShieldController: ObservableObject {
     }
 
     private func applyShields(shieldDisplayIDs: Set<String>) {
-        closeActiveShields()
-
         let displaysByID = Dictionary(
             uniqueKeysWithValues: displayProvider.currentDisplays().map { ($0.id, $0) }
         )
+        let currentIDs = Set(activeTokens.map(\.displayID))
 
-        activeTokens = shieldDisplayIDs.compactMap { displayID in
-            guard let display = displaysByID[displayID] else {
-                return nil
+        if currentIDs == shieldDisplayIDs {
+            let geometryMatches = shieldDisplayIDs.allSatisfy { displayID in
+                guard let display = displaysByID[displayID], let applied = appliedDisplayFrames[displayID] else {
+                    return false
+                }
+
+                return display.frame == applied
             }
 
-            return shieldManager.showShield(on: display)
+            if geometryMatches {
+                shieldedDisplayCount = activeTokens.count
+                return
+            }
+
+            recreateShields(for: shieldDisplayIDs, displaysByID: displaysByID)
+            shieldedDisplayCount = activeTokens.count
+            return
         }
+
+        let toRemove = currentIDs.subtracting(shieldDisplayIDs)
+        for token in activeTokens where toRemove.contains(token.displayID) {
+            shieldManager.closeShield(token)
+            appliedDisplayFrames.removeValue(forKey: token.displayID)
+        }
+        activeTokens.removeAll { toRemove.contains($0.displayID) }
+
+        let existingIDs = Set(activeTokens.map(\.displayID))
+        for displayID in shieldDisplayIDs where !existingIDs.contains(displayID) {
+            guard let display = displaysByID[displayID] else {
+                continue
+            }
+
+            if let token = shieldManager.showShield(on: display) {
+                activeTokens.append(token)
+                appliedDisplayFrames[displayID] = display.frame
+            }
+        }
+
         shieldedDisplayCount = activeTokens.count
+    }
+
+    private func recreateShields(for shieldDisplayIDs: Set<String>, displaysByID: [String: DisplaySnapshot]) {
+        for token in activeTokens {
+            shieldManager.closeShield(token)
+        }
+        activeTokens.removeAll()
+        appliedDisplayFrames.removeAll()
+
+        for displayID in shieldDisplayIDs {
+            guard let display = displaysByID[displayID] else {
+                continue
+            }
+
+            if let token = shieldManager.showShield(on: display) {
+                activeTokens.append(token)
+                appliedDisplayFrames[displayID] = display.frame
+            }
+        }
     }
 
     private func closeActiveShields() {
         activeTokens.forEach { shieldManager.closeShield($0) }
         activeTokens.removeAll()
+        appliedDisplayFrames.removeAll()
         shieldedDisplayCount = 0
     }
 }
